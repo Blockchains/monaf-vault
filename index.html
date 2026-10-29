@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>monaf vault control</title><meta name="robots" content="noindex">
+<style>
+:root{color-scheme:dark}body{font:15px/1.45 ui-sans-serif,system-ui,-apple-system,sans-serif;background:#0b0b0f;color:#e4e4e7;max-width:560px;margin:0 auto;padding:14px}
+h1{font-size:20px;margin:4px 0}.muted{color:#a1a1aa;font-size:13px}.warn{background:#3b1d0b;border:1px solid #b45309;color:#fde68a;padding:10px;border-radius:10px;font-size:13px;margin:10px 0}
+.card{background:#16161d;border:1px solid #27272a;border-radius:12px;padding:12px;margin:10px 0}.row{display:flex;justify-content:space-between;gap:8px;padding:3px 0;border-bottom:1px dashed #27272a}.row:last-child{border:0}
+code,.mono{font-family:ui-monospace,Menlo,monospace;font-size:12px;word-break:break-all}a{color:#a78bfa}
+button{width:100%;padding:13px;margin:5px 0;border-radius:10px;border:1px solid #3f3f46;background:#27272a;color:#fafafa;font-size:15px;font-weight:600}
+button.primary{background:#6d28d9;border-color:#7c3aed}button.danger{background:#7f1d1d;border-color:#b91c1c}button:disabled{opacity:.45}
+.amt{display:flex;gap:6px;align-items:center}.amt input{flex:0 0 120px;padding:12px;border-radius:10px;border:1px solid #3f3f46;background:#0b0b0f;color:#fafafa;font-size:15px}.amt button{flex:1}
+#log{white-space:pre-wrap}.ok{color:#86efac}.bad{color:#fca5a5}
+</style></head><body>
+<h1>monaf vault control</h1>
+<div class="muted">MON/WETH Uniswap v4 maker vault on Monad (chain 143). Every button opens your wallet so you can confirm the transaction.</div>
+<div class="warn"><b>Alpha software.</b> This vault is an experimental market-making contract. You can lose money from price moves, gas, or bugs, and there is no guaranteed return. Only fund what you can afford to lose. Pause or Withdraw all can be used at any time.</div>
+
+<div class="card">
+  <button id="connect" class="primary">Connect wallet</button>
+  <div class="row"><span>Account</span><span id="acct" class="mono">not connected</span></div>
+  <div class="row"><span>Network</span><span id="net">–</span></div>
+  <div class="row"><span>Write access</span><span id="role">–</span></div>
+</div>
+
+<div class="card">
+  <div class="row"><span>Vault</span><a id="vaultLink" class="mono" target="_blank" rel="noopener"></a></div>
+  <div class="row"><span>Owner</span><span id="owner" class="mono">–</span></div>
+  <div class="row"><span>Active</span><span id="active">–</span></div>
+  <div class="row"><span>Paused</span><span id="paused">–</span></div>
+  <div class="row"><span>Open orders</span><span id="open">–</span></div>
+  <div class="row"><span>Vault MON</span><span id="vmon">–</span></div>
+  <div class="row"><span>Vault WETH</span><span id="vweth">–</span></div>
+  <div class="row"><span>Keeper MON (gas)</span><span id="kmon">–</span></div>
+  <button id="refresh">Refresh status</button>
+</div>
+
+<div class="card" id="writes">
+  <div class="muted">Setup order: 1) fund MON, 2) send WETH, 3) fund keeper gas, 4) activate.</div>
+  <div class="amt"><input id="amtMon" inputmode="decimal" value="1100"><button data-act="fundVault" class="w">Fund vault (MON)</button></div>
+  <div class="amt"><input id="amtWeth" inputmode="decimal" value="0.0098"><button data-act="sendWeth" class="w">Send WETH to vault</button></div>
+  <div class="amt"><input id="amtKeeper" inputmode="decimal" value="20"><button data-act="fundKeeper" class="w">Fund keeper gas (MON)</button></div>
+  <button data-act="activate" class="w primary">Activate (setActive true)</button>
+  <button data-act="pause" class="w">Pause (setPaused true)</button>
+  <button data-act="unpause" class="w">Unpause (setPaused false)</button>
+  <button data-act="withdrawAll" class="w danger">Withdraw all to owner (gas 800k)</button>
+</div>
+
+<div class="card"><b>Log</b><div id="log" class="mono muted">Open this page in Trust Wallet's dApp browser (or any wallet browser) and tap Connect.</div></div>
+<div class="muted">No keys are stored or requested here. Reads and writes go through your wallet's own provider. Writes are refused unless the connected account is the vault owner <span class="mono">0x9a43…ac1f</span>.</div>
+
+<script src="vault-lib.js"></script>
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id), EXP = 'https://monadvision.com';
+  const prov = () => window.ethereum || (window.trustwallet && (window.trustwallet.ethereum || window.trustwallet));
+  let acct = null, chainOk = false;
+  $('vaultLink').href = `${EXP}/address/${MV.VAULT}`; $('vaultLink').textContent = MV.VAULT.slice(0, 8) + '…' + MV.VAULT.slice(-4);
+  const log = (m, cls) => { const d = document.createElement('div'); if (cls) d.className = cls; d.innerHTML = `${new Date().toLocaleTimeString()} ${m}`; $('log').prepend(d); };
+  const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  async function rq(method, params) { const p = prov(); if (!p) throw new Error('No wallet provider found. Open this page inside Trust Wallet\'s dApp browser.'); return p.request({ method, params }); }
+  function render() {
+    $('acct').textContent = acct ? acct.slice(0, 6) + '…' + acct.slice(-4) : 'not connected';
+    const own = acct && MV.isOwner(acct);
+    $('role').innerHTML = !acct ? '–' : own ? '<span class="ok">owner ✓</span>' : '<span class="bad">read-only (not owner)</span>';
+    document.querySelectorAll('button.w').forEach((b) => (b.disabled = !(own && chainOk)));
+  }
+  async function ensureChain() {
+    let id = await rq('eth_chainId');
+    if (parseInt(id, 16) !== MV.CHAIN_ID) {
+      try { await rq('wallet_switchEthereumChain', [{ chainId: MV.CHAIN_HEX }]); }
+      catch (e) {
+        if (e && (e.code === 4902 || /unrecognized|not added|unknown chain/i.test(e.message || ''))) {
+          await rq('wallet_addEthereumChain', [{ chainId: MV.CHAIN_HEX, chainName: 'Monad', nativeCurrency: { name: 'MON', symbol: 'MON', decimals: 18 },
+            rpcUrls: ['https://rpc.monad.xyz'], blockExplorerUrls: [EXP] }]);
+        } else throw e;
+      }
+      id = await rq('eth_chainId');
+    }
+    chainOk = parseInt(id, 16) === MV.CHAIN_ID; $('net').innerHTML = chainOk ? '<span class="ok">Monad (143)</span>' : `<span class="bad">wrong chain ${esc(parseInt(id, 16))}</span>`;
+    render(); return chainOk;
+  }
+  const call = (to, data) => rq('eth_call', [{ to, data }, 'latest']);
+  async function refresh() {
+    try {
+      if (!chainOk && !(await ensureChain())) return;
+      const [o, a, p, n, vm, vw, km] = await Promise.all([call(MV.VAULT, MV.SEL.owner), call(MV.VAULT, MV.SEL.active), call(MV.VAULT, MV.SEL.paused), call(MV.VAULT, MV.SEL.openCount),
+        rq('eth_getBalance', [MV.VAULT, 'latest']), call(MV.WETH, MV.SEL.balanceOf + MV.addrWord(MV.VAULT)), rq('eth_getBalance', [MV.KEEPER, 'latest'])]);
+      const own = '0x' + o.slice(-40); $('owner').textContent = own.slice(0, 6) + '…' + own.slice(-4) + (MV.isOwner(own) ? ' (Trust ✓)' : ' (unexpected!)');
+      const b = (x) => BigInt(x) !== 0n; $('active').innerHTML = b(a) ? '<span class="ok">yes</span>' : 'no';
+      $('paused').innerHTML = b(p) ? '<span class="bad">yes</span>' : 'no'; $('open').textContent = BigInt(n).toString();
+      $('vmon').textContent = MV.fmt(vm) + ' MON'; $('vweth').textContent = MV.fmt(vw, 6) + ' WETH'; $('kmon').textContent = MV.fmt(km) + ' MON';
+    } catch (e) { log(esc(e.message || e), 'bad'); }
+  }
+  async function connect() {
+    try { const a = await rq('eth_requestAccounts'); acct = a && a[0]; render(); await ensureChain(); await refresh(); log('connected ' + esc(acct || ''), 'ok'); }
+    catch (e) { log(esc(e.message || e), 'bad'); }
+  }
+  const LABEL = { fundVault: 'Fund vault', sendWeth: 'Send WETH', fundKeeper: 'Fund keeper gas', activate: 'Activate', pause: 'Pause', unpause: 'Unpause', withdrawAll: 'Withdraw all' };
+  async function act(name) {
+    try {
+      if (!acct) throw new Error('Connect first.'); if (!MV.isOwner(acct)) throw new Error('Refused: connected account is not the vault owner.');
+      if (!(await ensureChain())) throw new Error('Switch to Monad (143) first.');
+      const amt = { fundVault: $('amtMon').value, sendWeth: $('amtWeth').value, fundKeeper: $('amtKeeper').value }[name];
+      const t = MV.tx[name](amt);
+      if (name === 'withdrawAll' && !confirm('Withdraw ALL: pauses, deactivates, closes every position and sends all MON + WETH to the owner. Continue?')) return;
+      log(`${LABEL[name]}${amt ? ' ' + esc(amt) : ''}: confirm in wallet…`);
+      const hash = await rq('eth_sendTransaction', [Object.assign({ from: acct }, t)]);
+      log(`${LABEL[name]} sent: <a target="_blank" rel="noopener" href="${EXP}/tx/${esc(hash)}">${esc(hash.slice(0, 12))}…</a>`, 'ok');
+      setTimeout(refresh, 4000); setTimeout(refresh, 12000);
+    } catch (e) { log(`${LABEL[name] || name}: ${esc(e.message || e)}`, 'bad'); }
+  }
+  $('connect').onclick = connect; $('refresh').onclick = refresh;
+  document.querySelectorAll('button.w').forEach((b) => (b.onclick = () => act(b.dataset.act)));
+  const p = prov(); if (p && p.on) { p.on('accountsChanged', (a) => { acct = a && a[0]; render(); refresh(); }); p.on('chainChanged', () => { chainOk = false; ensureChain().then(refresh).catch(() => {}); }); }
+  if (p) rq('eth_accounts').then((a) => { if (a && a[0]) { acct = a[0]; render(); ensureChain().then(refresh).catch(() => {}); } }).catch(() => {}); else log('No wallet detected. Open in Trust Wallet → Browser.', 'bad');
+  render();
+})();
+</script>
+</body></html>
