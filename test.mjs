@@ -14,4 +14,7 @@ for (const [t, n] of [[a, 'activate'], [p, 'pause'], [u, 'unpause'], [x, 'withdr
 assert.equal(BigInt(x.gas), 800000n);
 assert.equal(MV.toWei('0.0098'), 9800000000000000n); assert.throws(() => MV.toWei('-1')); assert.throws(() => MV.toWei('0')); assert.throws(() => MV.toWei('1e3'));
 assert.ok(MV.isOwner('0x9A4382E8C662B827cf38A1f18cb5fa07ce61Ac1F')); assert.ok(!MV.isOwner('0x85c2bBcf6d7419740d01a60874BD3F85B2c96Fe2'));
+for (const v of ['0x8f', '0x8F', '143', ' 143 ', 143, 143n]) assert.equal(MV.parseChainId(v), 143, String(v));
+assert.equal(MV.parseChainId('0x143'), 323); assert.ok(Number.isNaN(MV.parseChainId('abc'))); assert.ok(Number.isNaN(MV.parseChainId(undefined)));
+console.log('CHAINID OK');
 console.log('ALL CALLDATA MATCHES RUNBOOK');

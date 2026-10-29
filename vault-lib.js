@@ -25,6 +25,14 @@
     unpause: () => ({ to: VAULT, value: '0x0', data: SEL.setPaused + word(0) }),
     withdrawAll: () => ({ to: VAULT, value: '0x0', data: SEL.withdrawAll + word(DEADLINE), gas: WITHDRAW_GAS }),
   };
+  function parseChainId(v) { // wallets differ: '0x8f', '143', 143, 143n
+    if (typeof v === 'number') return Number.isFinite(v) ? v : NaN;
+    if (typeof v === 'bigint') return Number(v);
+    if (typeof v !== 'string') return NaN; const s = v.trim();
+    if (/^0x[0-9a-f]+$/i.test(s)) return parseInt(s, 16);
+    if (/^\d+$/.test(s)) return parseInt(s, 10);
+    return NaN;
+  }
   const isOwner = (a) => typeof a === 'string' && a.toLowerCase() === OWNER;
-  g.MV = { VAULT, OWNER, KEEPER, WETH, CHAIN_ID, CHAIN_HEX, SEL, word, addrWord, toWei, fmt, hex, tx, isOwner };
+  g.MV = { VAULT, OWNER, KEEPER, WETH, CHAIN_ID, CHAIN_HEX, SEL, word, addrWord, toWei, fmt, hex, tx, isOwner, parseChainId };
 })(typeof window !== 'undefined' ? window : globalThis);

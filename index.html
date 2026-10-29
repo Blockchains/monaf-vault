@@ -48,7 +48,7 @@ button.primary{background:#6d28d9;border-color:#7c3aed}button.danger{background:
 <div class="card"><b>Log</b><div id="log" class="mono muted">Open this page in Trust Wallet's dApp browser (or any wallet browser) and tap Connect.</div></div>
 <div class="muted">No keys are stored or requested here. Reads and writes go through your wallet's own provider. Writes are refused unless the connected account is the vault owner <span class="mono">0x9a43…ac1f</span>.</div>
 
-<script src="vault-lib.js"></script>
+<script src="vault-lib.js?v=2"></script>
 <script>
 (function () {
   const $ = (id) => document.getElementById(id), EXP = 'https://monadvision.com';
@@ -64,9 +64,14 @@ button.primary{background:#6d28d9;border-color:#7c3aed}button.danger{background:
     $('role').innerHTML = !acct ? '–' : own ? '<span class="ok">owner ✓</span>' : '<span class="bad">read-only (not owner)</span>';
     document.querySelectorAll('button.w').forEach((b) => (b.disabled = !(own && chainOk)));
   }
+  async function chainNow() {
+    let id = NaN; try { id = MV.parseChainId(await rq('eth_chainId')); } catch (e) {}
+    if (id !== MV.CHAIN_ID) { try { const nv = MV.parseChainId(await rq('net_version')); if (nv === MV.CHAIN_ID || !Number.isFinite(id)) id = nv; } catch (e) {} }
+    return id;
+  }
   async function ensureChain() {
-    let id = await rq('eth_chainId');
-    if (parseInt(id, 16) !== MV.CHAIN_ID) {
+    let id = await chainNow();
+    if (id !== MV.CHAIN_ID) {
       try { await rq('wallet_switchEthereumChain', [{ chainId: MV.CHAIN_HEX }]); }
       catch (e) {
         if (e && (e.code === 4902 || /unrecognized|not added|unknown chain/i.test(e.message || ''))) {
@@ -74,9 +79,9 @@ button.primary{background:#6d28d9;border-color:#7c3aed}button.danger{background:
             rpcUrls: ['https://rpc.monad.xyz'], blockExplorerUrls: [EXP] }]);
         } else throw e;
       }
-      id = await rq('eth_chainId');
+      id = await chainNow();
     }
-    chainOk = parseInt(id, 16) === MV.CHAIN_ID; $('net').innerHTML = chainOk ? '<span class="ok">Monad (143)</span>' : `<span class="bad">wrong chain ${esc(parseInt(id, 16))}</span>`;
+    chainOk = id === MV.CHAIN_ID; $('net').innerHTML = chainOk ? '<span class="ok">Monad (143)</span>' : `<span class="bad">wrong chain ${esc(id)}</span>`;
     render(); return chainOk;
   }
   const call = (to, data) => rq('eth_call', [{ to, data }, 'latest']);
@@ -111,7 +116,7 @@ button.primary{background:#6d28d9;border-color:#7c3aed}button.danger{background:
   }
   $('connect').onclick = connect; $('refresh').onclick = refresh;
   document.querySelectorAll('button.w').forEach((b) => (b.onclick = () => act(b.dataset.act)));
-  const p = prov(); if (p && p.on) { p.on('accountsChanged', (a) => { acct = a && a[0]; render(); refresh(); }); p.on('chainChanged', () => { chainOk = false; ensureChain().then(refresh).catch(() => {}); }); }
+  const p = prov(); if (p && p.on) { p.on('accountsChanged', (a) => { acct = a && a[0]; render(); refresh(); }); p.on('chainChanged', (c) => { if (MV.parseChainId(c) === MV.CHAIN_ID) { chainOk = true; $('net').innerHTML = '<span class="ok">Monad (143)</span>'; render(); refresh(); return; } chainOk = false; ensureChain().then(refresh).catch(() => {}); }); }
   if (p) rq('eth_accounts').then((a) => { if (a && a[0]) { acct = a[0]; render(); ensureChain().then(refresh).catch(() => {}); } }).catch(() => {}); else log('No wallet detected. Open in Trust Wallet → Browser.', 'bad');
   render();
 })();
